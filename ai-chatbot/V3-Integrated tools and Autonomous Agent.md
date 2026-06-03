@@ -1,3 +1,25 @@
+## before update
+
+As `langgraph` is a more modern choise (the official has migrate the `create_react-agent` to `langgraph.prebuilt`), we introduce the package.
+```bash
+source .venv/bin/activate
+pip install langgraph
+```
+so the updated `app.py` will be based on `langgraph`.
+
+(In fact, you'd better verify that them are all be udapted to the latest version.)
+```bash
+pip install -U langgraph langchain
+```
+
+and for web search, the `ddgs` is needed:
+```bash 
+pip install -U ddgs
+```
+
+---
+## update `app.py`
+```python
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_deepseek import ChatDeepSeek
@@ -8,7 +30,6 @@ from langchain_core.messages import (
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain.agents import create_agent
 from langchain_core.tools import tool
-from langchain_tavily import TavilySearch
 import tiktoken
 import numexpr
 import uuid
@@ -35,14 +56,12 @@ CUSTOM_SYSTEM_PROMPT = """你是一个乐于助人的智能助手，可以记住
 - web_search：在互联网上搜索最新信息。
 
 重要规则：
-1. 当用户询问任何需要最新数据的内容时，必须使用 web_search 工具。
-2. 对于时间敏感查询时的特殊要求：
-- 如果用户提到相对时间（例如“今天”、“昨天”、“上周”、“去年”），你**必须**在调用 web_search 之前，将相对时间转换为绝对日期（格式：YYYY-MM-DD）。
-- 例如：“广州昨天天气” → 你应该先计算昨天是 2026-06-02（假设今天是 2026-06-03），然后搜索 "广州天气 2026-06-02"。
-- 绝对不要直接搜索“昨天xxx”，因为搜索引擎不理解相对时间。
-3. 如果工具返回结果，请基于结果回答用户。
-4. 对于纯数学计算，使用 calculator。
-5. 如果只是闲聊或基于已有知识的回答，可以不调用工具。"""
+- 当用户询问任何需要最新数据、实时信息、新闻、天气等时，必须使用 web_search 工具。
+- 绝对不要声称"无法联网"或"搜索功能不可用"。你确实可以搜索，请直接使用工具。
+- 如果工具返回结果，请基于结果回答用户。
+- 对于纯数学计算，使用 calculator。
+- 如果只是闲聊或基于已有知识的回答，可以不调用工具。
+- 使用中文与用户交流。"""
 
 
 # ---------- token 计数和裁剪 ----------
@@ -75,39 +94,19 @@ def calculator(expression: str) -> str:
 
 @tool
 def web_search(query: str) -> str:
-    """搜索互联网获取最新信息。输入查询关键词，返回前几条结果摘要。
-    
-    建议在查询中明确包含日期（例如 '广州天气 2026-06-02'），以获得更准确的历史或实时信息。
-    不要主动限制搜索的时间范围，让搜索引擎自然返回最相关结果即可。
-    """
+    """搜索互联网获取最新信息。输入查询关键词，返回前几条结果摘要。"""
     try:
-        from langchain_tavily import TavilySearch
-        
-        # 不设置 time_range，让搜索全面覆盖
-        search_tool = TavilySearch(
-            max_results=3,
-            topic="general",
-            include_answer=True,
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=3))
+        if not results:
+            return "未找到相关结果。"
+        return "\n\n".join(
+            f"【{r['title']}】{r['body']}" for r in results
         )
-        result = search_tool.invoke({"query": query})
-        
-        if hasattr(result, 'get'):
-            answer_part = result.get('answer', '')
-            answer_text = f"AI 生成的答案: {answer_part}\n\n" if answer_part else ""
-            
-            results_list = result.get('results', [])
-            if not results_list and not answer_part:
-                return "未找到相关结果。"
-            
-            web_results = "\n\n".join(
-                f"【{r.get('title', '无标题')}】\n{r.get('content', '无内容')}"
-                for r in results_list
-            )
-            return f"{answer_text}{web_results}".strip()
-        return str(result)
     except Exception as e:
-        return f"搜索服务调用失败: {str(e)}。请检查网络或稍后重试。"
-        
+        return f"搜索出错：{str(e)}"
+
 tools = [calculator, web_search]
 
 

@@ -1,4 +1,3 @@
-## Initial
 ### 1. create a new repository on Github
 ### 2. create the project
 ```bash
@@ -26,7 +25,7 @@ source .venv/bin/activate
 
 ### 4. install core dependencies
 ```bash
-pip install langchain langchain-openai langchain-deepseek streamlit python-dotenv
+pip install langchain langchain-openai langchain-deepseek streamlit python-dotenv tiktoken chromadb duckduckgo-search numexpr
 ```
 
 ### 5. manage key
@@ -55,7 +54,7 @@ from langchain_deepseek import ChatDeepSeek
 load_dotenv()
 
 st.title("Chatbot Demo (DeepSeek)")
-llm = ChatOpenAI(model="DeepSeek-chat",temperature=0.7)
+llm = ChatDeepSeek(model="deepSeek-chat",temperature=0.7)
 
 user_input = st.text_input("You:")
 if user_input:
