@@ -1,3 +1,9 @@
+基于已有的稳定架构，增加流式输出、参数调节、清除对话和错误处理，让应用体验更接近生产级。
+
+
+
+## app.py --V4
+```python
 import os
 os.environ["UVLOOP_DISABLE"] = "1"
 
@@ -209,3 +215,4 @@ if prompt_input := st.chat_input("输入你的问题..."):
 
     st.session_state.messages.append(AIMessage(content=final_response))
     st.rerun()
+```
