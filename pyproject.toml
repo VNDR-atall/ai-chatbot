@@ -1,0 +1,26 @@
+[project]
+name = "ai-chatbot"
+version = "0.1.0"
+description = "A ReAct-based AI agent with terminal interaction capabilities"
+requires-python = ">=3.10"
+dependencies = [
+    "langchain>=1.3.0",
+    "langgraph>=1.2.0",
+    "langchain-deepseek>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "rich>=15.0.0",
+    "prompt_toolkit>=3.0.0",
+    "tiktoken>=0.13.0",
+    "numexpr>=2.14.0",
+]
+
+[project.scripts]
+agent = "agent.cli:main"
+
+[project.optional-dependencies]
+web = ["streamlit>=1.50.0"]
+search = ["langchain-tavily>=0.2.0"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
