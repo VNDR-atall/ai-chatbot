@@ -1,220 +1,70 @@
 import streamlit as st
 from dotenv import load_dotenv
-from langchain_deepseek import ChatDeepSeek
-from langchain_core.messages import (
-    SystemMessage, HumanMessage, AIMessage,
-    trim_messages, BaseMessage
-)
-from langgraph.checkpoint.memory import InMemorySaver
-from langchain.agents import create_agent
-from langchain_core.tools import tool
-from langchain_tavily import TavilySearch
-import tiktoken
-import numexpr
-import uuid
+import os
 
 load_dotenv()
 
-# ---------- 页面配置 ----------
-st.set_page_config(page_title="AI Agent V3", page_icon="🤖")
-st.title("🤖 AI 智能 Agent (LangGraph v1 标准版)")
+from agent.react_agent import ReactAgent
 
+st.set_page_config(page_title="AI Agent", page_icon="🤖")
+st.title("🤖 AI 智能 Agent")
 
-# ---------- 初始化模型 ----------
-@st.cache_resource
-def get_llm():
-    return ChatDeepSeek(model="deepseek-chat", temperature=0)
-
-
-llm = get_llm()
-
-# ---------- 自定义系统提示 ----------
-CUSTOM_SYSTEM_PROMPT = """你是一个乐于助人的智能助手，可以记住对话历史。
-你拥有以下工具：
-- calculator：计算数学表达式。
-- web_search：在互联网上搜索最新信息。
-
-重要规则：
-1. 当用户询问任何需要最新数据的内容时，必须使用 web_search 工具。
-2. 对于时间敏感查询时的特殊要求：
-- 如果用户提到相对时间（例如“今天”、“昨天”、“上周”、“去年”），你**必须**在调用 web_search 之前，将相对时间转换为绝对日期（格式：YYYY-MM-DD）。
-- 例如：“广州昨天天气” → 你应该先计算昨天是 2026-06-02（假设今天是 2026-06-03），然后搜索 "广州天气 2026-06-02"。
-- 绝对不要直接搜索“昨天xxx”，因为搜索引擎不理解相对时间。
-3. 如果工具返回结果，请基于结果回答用户。
-4. 对于纯数学计算，使用 calculator。
-5. 如果只是闲聊或基于已有知识的回答，可以不调用工具。"""
-
-
-# ---------- token 计数和裁剪 ----------
-tokenizer = tiktoken.get_encoding("cl100k_base")
-
-def count_tokens(messages):
-    text = " ".join(msg.content for msg in messages if hasattr(msg, "content"))
-    return len(tokenizer.encode(text))
-
-def trim_history(messages: list[BaseMessage]) -> list[BaseMessage]:
-    return trim_messages(
-        messages,
-        max_tokens=4096,
-        strategy="last",
-        token_counter=count_tokens,
-        include_system=True,
-        start_on="human",
-    )
-
-
-# ---------- 工具定义 ----------
-@tool
-def calculator(expression: str) -> str:
-    """计算数学表达式。输入纯数学表达式（例如 3+4*2），返回计算结果。"""
+if "agent" not in st.session_state:
+    working_dir = os.getcwd()
     try:
-        result = numexpr.evaluate(expression).item()
-        return f"计算结果：{result}"
+        st.session_state.agent = ReactAgent(working_dir=working_dir)
+        st.success(f"Agent 初始化成功！工作目录: {working_dir}")
     except Exception as e:
-        return f"计算出错：{str(e)}"
+        st.error(f"Agent 初始化失败: {str(e)}")
+        st.stop()
 
-@tool
-def web_search(query: str) -> str:
-    """搜索互联网获取最新信息。输入查询关键词，返回前几条结果摘要。
-    
-    建议在查询中明确包含日期（例如 '广州天气 2026-06-02'），以获得更准确的历史或实时信息。
-    不要主动限制搜索的时间范围，让搜索引擎自然返回最相关结果即可。
-    """
-    try:
-        from langchain_tavily import TavilySearch
-        
-        # 不设置 time_range，让搜索全面覆盖
-        search_tool = TavilySearch(
-            max_results=3,
-            topic="general",
-            include_answer=True,
-        )
-        result = search_tool.invoke({"query": query})
-        
-        if hasattr(result, 'get'):
-            answer_part = result.get('answer', '')
-            answer_text = f"AI 生成的答案: {answer_part}\n\n" if answer_part else ""
-            
-            results_list = result.get('results', [])
-            if not results_list and not answer_part:
-                return "未找到相关结果。"
-            
-            web_results = "\n\n".join(
-                f"【{r.get('title', '无标题')}】\n{r.get('content', '无内容')}"
-                for r in results_list
-            )
-            return f"{answer_text}{web_results}".strip()
-        return str(result)
-    except Exception as e:
-        return f"搜索服务调用失败: {str(e)}。请检查网络或稍后重试。"
-        
-tools = [calculator, web_search]
-
-
-# ---------- 构建 Agent（新版 create_agent API） ----------
-# 创建内存检查点保存器，用于实现对话记忆
-checkpointer = InMemorySaver()
-
-# 使用新版 create_agent 构建 ReAct 智能体
-agent = create_agent(
-    model=llm,
-    tools=tools,
-    system_prompt=CUSTOM_SYSTEM_PROMPT,  # 系统提示词
-    checkpointer=checkpointer,           # 启用对话记忆
-)
-
-
-# ---------- 会话状态 ----------
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        SystemMessage(content=CUSTOM_SYSTEM_PROMPT),
-        AIMessage(content="你好！我是你的AI助手，可以计算和搜索，有什么可以帮你的？")
-    ]
+    st.session_state.messages = []
 
 if "thinking_log" not in st.session_state:
     st.session_state.thinking_log = ""
 
-if "thread_id" not in st.session_state:
-    # 为本次会话生成唯一的线程 ID，用于记忆隔离
-    st.session_state.thread_id = str(uuid.uuid4())
-
-
-# ---------- 侧边栏 ----------
 with st.sidebar:
     st.header("🔍 Agent 思考过程")
     if st.session_state.thinking_log:
         st.text_area("日志", st.session_state.thinking_log, height=400)
     else:
         st.info("尚未有推理记录")
-
+    
     st.divider()
-    st.caption(f"会话 ID: {st.session_state.thread_id[:8]}...")
+    st.caption(f"会话 ID: {st.session_state.agent.memory.get_thread_id()[:8]}...")
 
-
-# ---------- 显示历史消息 ----------
 for msg in st.session_state.messages:
-    if isinstance(msg, (HumanMessage, AIMessage)):
-        role = "user" if isinstance(msg, HumanMessage) else "assistant"
-        with st.chat_message(role):
-            st.markdown(msg.content)
+    role = "user" if msg["role"] == "user" else "assistant"
+    with st.chat_message(role):
+        st.markdown(msg["content"])
 
-
-# ---------- 用户输入 ----------
 if prompt_input := st.chat_input("输入你的问题..."):
-    # 添加用户消息
-    user_msg = HumanMessage(content=prompt_input)
-    st.session_state.messages.append(user_msg)
+    st.session_state.messages.append({"role": "user", "content": prompt_input})
     with st.chat_message("user"):
         st.markdown(prompt_input)
 
     with st.chat_message("assistant"):
         with st.spinner("思考中..."):
-            # 准备输入消息（裁剪历史以控制 token 数量）
-            input_messages = trim_history(st.session_state.messages)
-
-            # 配置线程 ID，LangGraph 会自动管理该线程的对话历史
-            config = {"configurable": {"thread_id": st.session_state.thread_id}}
-
-            # 调用 Agent
-            # create_agent 使用 "messages" 键来传递消息
-            result = agent.invoke({"messages": input_messages}, config=config)
-
-            # 提取最终回复
-            final_answer = ""
-            thinking_steps = []
-
-            # 解析 Agent 返回的消息，提取工具调用过程和最终回复
-            for msg in result.get("messages", []):
-                # 处理工具调用请求（AIMessage 包含 tool_calls）
-                if isinstance(msg, AIMessage) and hasattr(msg, "tool_calls") and msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        thinking_steps.append(f"🛠️ 工具：{tc.get('name', '未知')}")
-                        thinking_steps.append(f"📥 输入：{tc.get('args', {})}")
-                # 处理工具返回结果（ToolMessage 类型）
-                elif hasattr(msg, "type") and msg.type == "tool":
-                    thinking_steps.append(f"👀 观察：{msg.content}")
-                # 最终回复（AIMessage 且不包含 tool_calls）
-                elif isinstance(msg, AIMessage) and not (hasattr(msg, "tool_calls") and msg.tool_calls):
-                    if msg.content:
-                        final_answer = msg.content
-
-            # 如果没有解析出最终回复，尝试取最后一条消息
-            if not final_answer and result.get("messages"):
-                last_msg = result["messages"][-1]
-                if hasattr(last_msg, "content"):
-                    final_answer = last_msg.content
-
-            # 更新侧边栏日志
+            result = st.session_state.agent.run(prompt_input)
+            
+            thinking_steps = st.session_state.agent.get_thinking_steps()
+            
+            thinking_log_lines = []
             if thinking_steps:
-                st.session_state.thinking_log = "\n".join(thinking_steps)
+                for i, (thought, action, observation) in enumerate(thinking_steps, 1):
+                    thinking_log_lines.append(f"步骤 {i}:")
+                    thinking_log_lines.append(f"💡 Thought: {thought}")
+                    thinking_log_lines.append(f"🛠️ Action: {action}")
+                    if observation:
+                        thinking_log_lines.append(f"👀 Observation: {observation}")
+                    thinking_log_lines.append("")
+                st.session_state.thinking_log = "\n".join(thinking_log_lines)
             else:
                 st.session_state.thinking_log = "（无工具调用）"
+            
+            if not result:
+                result = "抱歉，我无法处理这个问题。"
+            st.markdown(result)
 
-            # 显示最终回复
-            if not final_answer:
-                final_answer = "抱歉，我无法处理这个问题。"
-            st.markdown(final_answer)
-
-    # 保存最终回复到会话历史
-    assistant_msg = AIMessage(content=final_answer)
-    st.session_state.messages.append(assistant_msg)
+    st.session_state.messages.append({"role": "assistant", "content": result})
